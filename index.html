@@ -219,7 +219,15 @@
         </details>
 
         <details>
-          <summary>Kunci otomatis</summary>
+          <summary>Privasi &amp; kunci otomatis</summary>
+          <label>Cara menampilkan private key
+            <select id="reveal-mode">
+              <option value="hold">Tahan tombol untuk melihat (disarankan)</option>
+              <option value="toggle">Klik untuk tampil selama 30 detik</option>
+            </select>
+          </label>
+          <label class="check"><input type="checkbox" id="privacy-blur"> Samarkan layar saat aplikasi tidak aktif (pindah aplikasi, klik jendela lain, berbagi layar)</label>
+          <p class="muted small">Tombol <b>Salin</b> tetap tersedia. Seekure membersihkan clipboard setelah 30 detik, tetapi tidak bisa menghapus <b>riwayat clipboard</b>. Matikan riwayat clipboard di Windows (Win+V → Pengaturan) dan di keyboard HP (Gboard / Samsung) agar private key tidak tersimpan di sana.</p>
           <label>Kunci setelah tidak aktif
             <select id="autolock">
               <option value="1">1 menit</option>
@@ -248,6 +256,7 @@
             <button type="submit" class="danger">Hapus permanen</button>
           </form>
         </details>
+        <p class="muted small center" id="app-version"></p>
       </div>
     </section>
   </main>

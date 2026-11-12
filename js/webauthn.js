@@ -19,6 +19,11 @@ export function fromB64url(s) {
   return fromB64(s.replace(/-/g, '+').replace(/_/g, '/') + '==='.slice((s.length + 3) % 4));
 }
 
+/** Kunci WebAuthn terikat ke domain (RP ID). Slot lama tanpa `rp` dianggap cocok. */
+export function slotsForThisSite(slots) {
+  return slots.filter((s) => (s.rp ?? location.hostname) === location.hostname);
+}
+
 export function hardwareSupported() {
   return Boolean(globalThis.PublicKeyCredential && globalThis.isSecureContext && navigator.credentials);
 }
@@ -68,7 +73,7 @@ export async function registerKey(label, existingIds = []) {
   const ext = cred.getClientExtensionResults().prf;
   if (!ext || ext.enabled === false) throw new Error(UNSUPPORTED);
 
-  const slot = { id, salt: toB64(salt), label };
+  const slot = { id, salt: toB64(salt), label, rp: location.hostname };
   if (ext.results?.first) return { ...slot, prf: new Uint8Array(ext.results.first) };
   // Sebagian kunci baru mengeluarkan hasil PRF saat autentikasi → minta sentuhan kedua.
   const { prf } = await evaluateKey([slot]);

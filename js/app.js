@@ -4,7 +4,8 @@ import {
   isValidRecord, randomBytes, toB64, generateRecoveryCodes, hashRecoveryCode, timingSafeEqual, fingerprint,
 } from './crypto.js';
 import { generateSecret, verifyTotp, otpauthUri } from './totp.js';
-import { hardwareSupported, registerKey, evaluateKey } from './webauthn.js';
+import { hardwareSupported, registerKey, evaluateKey, slotsForThisSite } from './webauthn.js';
+import { APP_VERSION } from './version.js';
 
 const STORE_KEY = 'seekure.vault';
 const LOCK_KEY = 'seekure.lockout';
@@ -149,11 +150,29 @@ document.addEventListener('visibilitychange', () => {
   else if (session && hiddenAt && Date.now() - hiddenAt > HIDDEN_LOCK_MS) lock('Terkunci karena aplikasi ditinggalkan.');
 });
 
+// ---------- privasi layar ----------
+const revealMode = () => session?.data.settings?.revealMode ?? 'hold';
+const privacyBlurOn = () => session?.data.settings?.privacyBlur ?? true;
+const secretHiders = new Set();
+function hideAllSecrets() { for (const hide of secretHiders) hide(); }
+function setPrivacy(on) {
+  document.body.classList.toggle('privacy', Boolean(on && session && privacyBlurOn()));
+}
+addEventListener('blur', () => { hideAllSecrets(); setPrivacy(true); });
+addEventListener('focus', () => setPrivacy(false));
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) { hideAllSecrets(); setPrivacy(true); } else if (document.hasFocus()) setPrivacy(false);
+});
+addEventListener('pagehide', hideAllSecrets);
+
 function lock(msg) {
   session = null;
   pending = null;
   resetState = null;
   clearTimeout(idleTimer);
+  hideAllSecrets();
+  secretHiders.clear();
+  setPrivacy(false);
   $('key-list').replaceChildren();
   $('hw-list').replaceChildren();
   if ($('dlg-key').open) $('dlg-key').close();
@@ -346,7 +365,12 @@ $('btn-hw-unlock').addEventListener('click', async (e) => {
   $('hw-error').textContent = '';
   await busy(e.currentTarget, async () => {
     try {
-      const { id, prf } = await evaluateKey(pending.sess.hw.slots);
+      const slots = slotsForThisSite(pending.sess.hw.slots);
+      if (!slots.length) {
+        const sites = [...new Set(pending.sess.hw.slots.map((s) => s.rp))].join(', ');
+        throw new Error(`Kunci fisik brankas ini didaftarkan untuk ${sites}, bukan alamat ini. Buka dengan kunci pemulihan, lalu daftarkan kunci fisik untuk alamat ini di Pengaturan.`);
+      }
+      const { id, prf } = await evaluateKey(slots);
       const data = await unlockHardware(record, pending.sess, id, prf);
       await finishUnlock(data);
     } catch (err) {
@@ -388,22 +412,44 @@ function renderKeys() {
   const q = $('search').value.trim().toLowerCase();
   const keys = session.data.keys.filter((k) => !q || k.label.toLowerCase().includes(q) || k.type.toLowerCase().includes(q));
   $('empty').hidden = session.data.keys.length > 0;
+  secretHiders.clear();
   $('key-list').replaceChildren(...keys.map(keyItem));
 }
 $('search').addEventListener('input', renderKeys);
 
 function keyItem(k) {
   const secretBox = el('pre', { className: 'secret-box', hidden: true });
+  const hold = revealMode() === 'hold';
+  const btnReveal = el('button', { type: 'button', className: hold ? 'ghost hold-btn' : 'ghost', textContent: hold ? 'Tahan untuk lihat' : 'Tampilkan' });
   let hideTimer;
-  const btnReveal = el('button', { type: 'button', className: 'ghost', textContent: 'Tampilkan' });
-  btnReveal.onclick = () => {
-    const showing = secretBox.hidden;
-    secretBox.hidden = !showing;
-    secretBox.textContent = showing ? k.secret : '';
-    btnReveal.textContent = showing ? 'Sembunyikan' : 'Tampilkan';
+  const setShown = (on) => {
     clearTimeout(hideTimer);
-    if (showing) hideTimer = setTimeout(() => { secretBox.hidden = true; secretBox.textContent = ''; btnReveal.textContent = 'Tampilkan'; }, REVEAL_MS);
+    secretBox.hidden = !on;
+    secretBox.textContent = on ? k.secret : '';
+    btnReveal.classList.toggle('active', on && hold);
+    if (!hold) btnReveal.textContent = on ? 'Sembunyikan' : 'Tampilkan';
+    if (on && !hold) hideTimer = setTimeout(() => setShown(false), REVEAL_MS);
   };
+  const hide = () => setShown(false);
+  secretHiders.add(hide);
+
+  if (hold) {
+    // Hanya terlihat selama tombol ditekan (mouse, sentuh, atau Spasi/Enter).
+    btnReveal.addEventListener('pointerdown', (e) => {
+      e.preventDefault();
+      btnReveal.setPointerCapture?.(e.pointerId);
+      setShown(true);
+    });
+    for (const ev of ['pointerup', 'pointercancel', 'lostpointercapture', 'blur']) btnReveal.addEventListener(ev, hide);
+    btnReveal.addEventListener('contextmenu', (e) => e.preventDefault());
+    btnReveal.addEventListener('keydown', (e) => {
+      if ((e.key === ' ' || e.key === 'Enter') && !e.repeat) { e.preventDefault(); setShown(true); }
+    });
+    btnReveal.addEventListener('keyup', (e) => { if (e.key === ' ' || e.key === 'Enter') hide(); });
+  } else {
+    btnReveal.onclick = () => setShown(secretBox.hidden);
+  }
+
   const btnCopy = el('button', { type: 'button', className: 'ghost', textContent: 'Salin' });
   btnCopy.onclick = () => copyText(k.secret, 'Private key disalin');
   const btnEdit = el('button', { type: 'button', className: 'ghost', textContent: 'Ubah' });
@@ -476,6 +522,10 @@ function openSettings() {
   $('rc-count').textContent = session.data.recovery.length;
   $('autolock').value = String(session.data.settings?.autoLockMin || 5);
   document.querySelectorAll('#screen-settings form').forEach((f) => f.reset());
+  $('reveal-mode').value = revealMode();
+  $('privacy-blur').checked = privacyBlurOn();
+  const offline = ['localhost', '127.0.0.1'].includes(location.hostname);
+  $('app-version').textContent = `Seekure v${APP_VERSION} · ${offline ? 'versi offline (tidak update otomatis)' : 'versi online (update otomatis)'}`;
   renderHwSection();
   show('screen-settings');
 }
@@ -518,6 +568,14 @@ $('form-regen').addEventListener('submit', async (e) => {
   showRecoveryCodes(codes);
 });
 
+async function saveSetting(patch) {
+  session.data.settings = { ...session.data.settings, ...patch };
+  await persist();
+  toast('Disimpan.');
+}
+$('reveal-mode').addEventListener('change', (e) => saveSetting({ revealMode: e.target.value }));
+$('privacy-blur').addEventListener('change', (e) => saveSetting({ privacyBlur: e.target.checked }));
+
 $('autolock').addEventListener('change', async (e) => {
   session.data.settings = { ...session.data.settings, autoLockMin: Number(e.target.value) };
   await persist();
@@ -550,7 +608,7 @@ function renderHwSection() {
       renderHwSection();
       toast('Kunci fisik dihapus.');
     };
-    return el('li', {}, el('div', {}, el('strong', { textContent: `🔑 ${s.label}` }), el('small', { textContent: `Didaftarkan ${fmtDate(s.createdAt)}` })), del);
+    return el('li', {}, el('div', {}, el('strong', { textContent: `🔑 ${s.label}` }), el('small', { textContent: `Didaftarkan ${fmtDate(s.createdAt)}${s.rp ? ` · untuk ${s.rp}` : ''}` })), del);
   }));
 }
 
@@ -596,7 +654,7 @@ $('form-hw-add').addEventListener('submit', async (e) => {
   e.preventDefault();
   await busy(submitBtn(e.target), async () => {
     try {
-      const key = await registerKey($('hw-add-label').value.trim() || 'Kunci cadangan', session.sess.hw.slots.map((s) => s.id));
+      const key = await registerKey($('hw-add-label').value.trim() || 'Kunci cadangan', slotsForThisSite(session.sess.hw.slots).map((s) => s.id));
       await addHardwareKey(session.sess, key);
       await persist();
       renderHwSection();

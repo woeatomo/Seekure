@@ -22,7 +22,7 @@ const server = createServer(async (req, res) => {
 }).listen(0, '127.0.0.1');
 await new Promise((r) => server.once('listening', r));
 // "localhost" (bukan IP) karena WebAuthn butuh nama domain sebagai RP ID.
-const url = `http://localhost:${server.address().port}/`;
+const url = process.env.BASE_URL || `http://localhost:${server.address().port}/`;
 
 const PW = 'kuda-terbang-makan-nasi-goreng-42';
 const KEY = '0x4c0883a69102937d6231471b5dbb6204fe5129617082792ae468d01a3f362318';
@@ -83,6 +83,21 @@ async function unlockTotp(page, t, secret) {
   await page.waitForSelector(`${visible('screen-vault')} .key`);
 }
 
+/** Mode "tahan untuk lihat": key hanya terlihat selama tombol ditekan. */
+async function readSecretHeld(page) {
+  await page.locator('.key .hold-btn').first().hover();
+  await page.mouse.down();
+  const text = await page.textContent('.secret-box');
+  assert.ok(await page.isVisible('.secret-box'));
+  return {
+    text,
+    release: async () => {
+      await page.mouse.up();
+      assert.ok(await page.isHidden('.secret-box'), 'key harus tersembunyi setelah tombol dilepas');
+    },
+  };
+}
+
 function assertEncrypted(stored) {
   assert.ok(!stored.includes(KEY.slice(2, 20)) && !stored.includes('Wallet'), 'vault harus terenkripsi');
 }
@@ -94,9 +109,39 @@ async function runTotp(name, contextOpts) {
   const snap = async (label) => shotDir && page.screenshot({ path: `${shotDir}/${name}-${label}.png`, fullPage: true });
 
   const { secret, codes } = await setupVault(page, t, snap);
+  const held = await readSecretHeld(page);
+  assert.equal(held.text, KEY);
+  await snap('4-vault');
+  await held.release();
+
+  // Layar disamarkan saat aplikasi tidak aktif; key yang tampil ikut disembunyikan
+  await page.locator('.key .hold-btn').hover();
+  await page.mouse.down();
+  await page.evaluate(() => dispatchEvent(new Event('blur')));
+  assert.ok(await page.evaluate(() => document.body.classList.contains('privacy')));
+  assert.ok(await page.isHidden('.secret-box'));
+  await snap('4b-privacy');
+  await page.mouse.up();
+  await page.evaluate(() => dispatchEvent(new Event('focus')));
+  assert.ok(!(await page.evaluate(() => document.body.classList.contains('privacy'))));
+
+  // Mode klik-untuk-tampil (opsional) + nonaktifkan penyamaran
+  await page.click('#btn-settings');
+  assert.match(await page.textContent('#app-version'), /^Seekure v\d+\.\d+\.\d+ · versi offline/);
+  await page.evaluate(() => { document.querySelector('#reveal-mode').closest('details').open = true; });
+  await page.selectOption('#reveal-mode', 'toggle');
+  await page.uncheck('#privacy-blur');
+  await page.click('#btn-settings-close');
   await page.click('.key button:has-text("Tampilkan")');
   assert.equal(await page.textContent('.secret-box'), KEY);
-  await snap('4-vault');
+  await page.evaluate(() => dispatchEvent(new Event('blur')));
+  assert.ok(!(await page.evaluate(() => document.body.classList.contains('privacy'))));
+  assert.ok(await page.isHidden('.secret-box'), 'key tetap disembunyikan saat jendela tidak aktif');
+  await page.evaluate(() => dispatchEvent(new Event('focus')));
+  await page.click('#btn-settings');
+  await page.selectOption('#reveal-mode', 'hold');
+  await page.check('#privacy-blur');
+  await page.click('#btn-settings-close');
   assertEncrypted(await page.evaluate(() => localStorage.getItem('seekure.vault')));
 
   // kunci → password salah → benar → kode lama (replay) ditolak → kode baru
@@ -221,8 +266,9 @@ async function runHardware(name, contextOpts) {
   await page.fill('#rk-input', rk.toLowerCase().replace(/-/g, ' '));
   await page.click('#form-rk button[type=submit]');
   await page.waitForSelector(`${visible('screen-vault')} .key`);
-  await page.click('.key button:has-text("Tampilkan")');
-  assert.equal(await page.textContent('.secret-box'), KEY);
+  const held = await readSecretHeld(page);
+  assert.equal(held.text, KEY);
+  await held.release();
 
   // Kunci B dicabut → kunci fisik tidak bisa → pesan error ramah (timeout disingkat)
   await cdp.send('WebAuthn.setAutomaticPresenceSimulation', { authenticatorId: keyB, enabled: false });

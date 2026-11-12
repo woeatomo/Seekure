@@ -224,9 +224,9 @@ export async function changePassword(sess, newPassword, iterations = PBKDF2_ITER
 }
 
 // ---------- kunci fisik ----------
-async function makeSlot(hk, { id, salt, prf, label }) {
+async function makeSlot(hk, { id, salt, prf, label, rp }) {
   const kek = await hkdfKey(prf, fromB64(salt), 'seekure-hw-kek');
-  return { type: 'webauthn', id, salt, label, createdAt: new Date().toISOString(), ...(await wrap(kek, hk, 'seekure-hw|' + id)) };
+  return { type: 'webauthn', id, salt, label, rp: rp ?? null, createdAt: new Date().toISOString(), ...(await wrap(kek, hk, 'seekure-hw|' + id)) };
 }
 
 async function makeRecoveryBox(hk) {

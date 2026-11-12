@@ -164,3 +164,15 @@ code.secret.big { font-size: 17px; line-height: 1.7; letter-spacing: .04em; padd
 .hw-list li small { display: block; color: var(--muted); font-size: 12px; }
 .hw-list li button { min-height: 34px; padding: 4px 12px; font-size: 14px; }
 #hw-on form + form, #hw-on form { border-top: 1px dashed var(--border); padding-top: 10px; margin-top: 10px; }
+
+/* ---- privasi ---- */
+label.check { display: flex; gap: 10px; align-items: flex-start; font-weight: 400; }
+label.check input { width: auto; margin: 3px 0 0; flex: none; }
+.hold-btn { user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; touch-action: manipulation; }
+.hold-btn.active { background: var(--primary); border-color: var(--primary); color: var(--primary-text); }
+body.privacy main, body.privacy .toast { filter: blur(14px); pointer-events: none; }
+body.privacy::after {
+  content: "🔒 Seekure disembunyikan"; position: fixed; inset: 0; display: grid; place-items: center;
+  font-weight: 700; font-size: 18px; color: var(--text); pointer-events: none; z-index: 30;
+}
+.secret-box { user-select: none; -webkit-user-select: none; }
