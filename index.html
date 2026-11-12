@@ -1,0 +1,217 @@
+<!doctype html>
+<html lang="id">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; manifest-src 'self'; worker-src 'self'; base-uri 'none'; form-action 'none'">
+  <meta name="referrer" content="no-referrer">
+  <meta name="theme-color" content="#0f172a">
+  <meta name="description" content="Seekure — brankas private key terenkripsi dengan 2FA, untuk PC dan smartphone.">
+  <title>Seekure</title>
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="icons/icon-192.png">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand"><img src="icons/icon.svg" alt="" width="28" height="28"> Seekure</div>
+    <div class="topbar-actions" id="vault-actions" hidden>
+      <button type="button" class="ghost" id="btn-settings">Pengaturan</button>
+      <button type="button" id="btn-lock">Kunci</button>
+    </div>
+  </header>
+
+  <main id="app">
+    <!-- ===== SETUP 1: master password ===== -->
+    <section id="screen-setup" class="card" hidden>
+      <h1>Buat brankas baru</h1>
+      <p class="muted">Langkah 1 dari 3 — buat <b>master password</b>. Password ini di-hash dengan PBKDF2-SHA-256 (600.000 iterasi) untuk menghasilkan kunci enkripsi AES-256. Password <b>tidak bisa dipulihkan</b> jika lupa.</p>
+      <form id="form-setup" autocomplete="off">
+        <label>Master password
+          <input type="password" id="setup-pw" minlength="12" required autocomplete="new-password">
+        </label>
+        <div class="meter"><div id="pw-meter"></div></div>
+        <p class="hint" id="pw-hint">Minimal 12 karakter. Gunakan kalimat panjang yang mudah diingat.</p>
+        <label>Ulangi password
+          <input type="password" id="setup-pw2" minlength="12" required autocomplete="new-password">
+        </label>
+        <p class="error" id="setup-error" role="alert"></p>
+        <button type="submit" class="primary">Lanjut</button>
+      </form>
+      <p class="muted small">Sudah punya cadangan? <button type="button" class="link" id="btn-import-start">Impor file cadangan</button></p>
+    </section>
+
+    <!-- ===== SETUP 2 / RESET: 2FA ===== -->
+    <section id="screen-2fa-setup" class="card" hidden>
+      <h1 id="twofa-title">Aktifkan 2FA</h1>
+      <p class="muted" id="twofa-sub">Langkah 2 dari 3 — pindai QR ini dengan aplikasi authenticator (Google Authenticator, Microsoft Authenticator, Authy, Aegis, 2FAS…).</p>
+      <div class="qr-wrap"><img id="qr-img" alt="Kode QR 2FA"></div>
+      <p class="muted small">Tidak bisa memindai? Masukkan kunci ini secara manual:</p>
+      <code class="secret" id="totp-secret-text"></code>
+      <form id="form-2fa-setup" autocomplete="off">
+        <label>Kode 6 digit dari aplikasi authenticator
+          <input type="text" id="setup-otp" inputmode="numeric" pattern="\d{6}" maxlength="6" required autocomplete="one-time-code">
+        </label>
+        <p class="error" id="twofa-error" role="alert"></p>
+        <div class="row">
+          <button type="button" class="ghost" id="btn-2fa-cancel">Batal</button>
+          <button type="submit" class="primary">Verifikasi</button>
+        </div>
+      </form>
+    </section>
+
+    <!-- ===== SETUP 3: recovery codes ===== -->
+    <section id="screen-recovery" class="card" hidden>
+      <h1>Simpan kode pemulihan</h1>
+      <p class="muted">Jika HP authenticator hilang, gunakan salah satu kode ini sebagai pengganti kode 2FA. Setiap kode hanya bisa dipakai <b>sekali</b>. Kode ini hanya ditampilkan sekarang — tulis di kertas dan simpan di tempat aman.</p>
+      <ol class="codes" id="recovery-list"></ol>
+      <div class="row">
+        <button type="button" class="ghost" id="btn-copy-codes">Salin</button>
+        <button type="button" class="primary" id="btn-recovery-done">Saya sudah menyimpannya</button>
+      </div>
+    </section>
+
+    <!-- ===== UNLOCK: password ===== -->
+    <section id="screen-unlock" class="card" hidden>
+      <h1>Buka brankas</h1>
+      <form id="form-unlock" autocomplete="off">
+        <label>Master password
+          <input type="password" id="unlock-pw" required autocomplete="current-password">
+        </label>
+        <p class="error" id="unlock-error" role="alert"></p>
+        <button type="submit" class="primary" id="btn-unlock">Lanjut</button>
+      </form>
+    </section>
+
+    <!-- ===== UNLOCK: 2FA ===== -->
+    <section id="screen-verify" class="card" hidden>
+      <h1>Verifikasi 2FA</h1>
+      <form id="form-verify" autocomplete="off">
+        <label id="verify-label">Kode 6 digit dari aplikasi authenticator
+          <input type="text" id="verify-otp" inputmode="numeric" maxlength="14" required autocomplete="one-time-code">
+        </label>
+        <p class="error" id="verify-error" role="alert"></p>
+        <div class="row">
+          <button type="button" class="ghost" id="btn-verify-cancel">Batal</button>
+          <button type="submit" class="primary">Buka</button>
+        </div>
+      </form>
+      <p class="muted small"><button type="button" class="link" id="btn-toggle-recovery">Gunakan kode pemulihan</button></p>
+    </section>
+
+    <!-- ===== VAULT ===== -->
+    <section id="screen-vault" hidden>
+      <div class="card">
+        <div class="row space">
+          <h1>Private key</h1>
+          <button type="button" class="primary" id="btn-add">+ Tambah</button>
+        </div>
+        <input type="search" id="search" placeholder="Cari label…" aria-label="Cari">
+        <ul class="keys" id="key-list"></ul>
+        <p class="muted center" id="empty" hidden>Belum ada private key. Tekan “+ Tambah”.</p>
+      </div>
+    </section>
+
+    <!-- ===== SETTINGS ===== -->
+    <section id="screen-settings" hidden>
+      <div class="card">
+        <div class="row space"><h1>Pengaturan</h1><button type="button" class="ghost" id="btn-settings-close">Tutup</button></div>
+
+        <details>
+          <summary>Ganti master password</summary>
+          <form id="form-chpw" autocomplete="off">
+            <label>Password saat ini<input type="password" id="chpw-old" required autocomplete="current-password"></label>
+            <label>Password baru<input type="password" id="chpw-new" minlength="12" required autocomplete="new-password"></label>
+            <label>Ulangi password baru<input type="password" id="chpw-new2" minlength="12" required autocomplete="new-password"></label>
+            <p class="error" id="chpw-error" role="alert"></p>
+            <button type="submit" class="primary">Simpan</button>
+          </form>
+        </details>
+
+        <details>
+          <summary>Atur ulang 2FA (ganti HP authenticator)</summary>
+          <form id="form-reset2fa" autocomplete="off">
+            <label>Kode 2FA saat ini atau kode pemulihan<input type="text" id="reset2fa-code" required autocomplete="one-time-code"></label>
+            <p class="error" id="reset2fa-error" role="alert"></p>
+            <button type="submit" class="primary">Lanjut</button>
+          </form>
+        </details>
+
+        <details>
+          <summary>Kode pemulihan (<span id="rc-count">0</span> tersisa)</summary>
+          <form id="form-regen" autocomplete="off">
+            <p class="muted small">Membuat 8 kode baru dan membatalkan semua kode lama.</p>
+            <label>Kode 2FA saat ini<input type="text" id="regen-code" inputmode="numeric" maxlength="6" required autocomplete="one-time-code"></label>
+            <p class="error" id="regen-error" role="alert"></p>
+            <button type="submit" class="primary">Buat kode baru</button>
+          </form>
+        </details>
+
+        <details>
+          <summary>Kunci otomatis</summary>
+          <label>Kunci setelah tidak aktif
+            <select id="autolock">
+              <option value="1">1 menit</option>
+              <option value="2">2 menit</option>
+              <option value="5">5 menit</option>
+              <option value="10">10 menit</option>
+              <option value="30">30 menit</option>
+            </select>
+          </label>
+        </details>
+
+        <details>
+          <summary>Cadangan &amp; sinkron PC ↔ HP</summary>
+          <p class="muted small">File cadangan tetap terenkripsi (AES-256-GCM). Untuk memindahkan brankas ke perangkat lain, ekspor di sini lalu impor di perangkat tujuan. Tetap butuh master password + 2FA untuk membukanya.</p>
+          <div class="row">
+            <button type="button" id="btn-export">Ekspor cadangan</button>
+            <button type="button" id="btn-import">Impor cadangan</button>
+          </div>
+        </details>
+
+        <details>
+          <summary class="danger-text">Hapus brankas dari perangkat ini</summary>
+          <form id="form-wipe" autocomplete="off">
+            <p class="muted small">Semua data di perangkat ini akan dihapus permanen. Pastikan Anda punya cadangan.</p>
+            <label>Ketik <b>HAPUS</b> untuk konfirmasi<input type="text" id="wipe-confirm" required></label>
+            <button type="submit" class="danger">Hapus permanen</button>
+          </form>
+        </details>
+      </div>
+    </section>
+  </main>
+
+  <!-- ===== Dialog tambah / ubah key ===== -->
+  <dialog id="dlg-key">
+    <form id="form-key" method="dialog" autocomplete="off">
+      <h2 id="dlg-key-title">Tambah private key</h2>
+      <label>Label<input type="text" id="key-label" maxlength="80" required placeholder="mis. Wallet ETH utama"></label>
+      <label>Jenis
+        <select id="key-type">
+          <option>Crypto wallet</option>
+          <option>Seed phrase</option>
+          <option>SSH</option>
+          <option>PGP</option>
+          <option>API key</option>
+          <option>Lainnya</option>
+        </select>
+      </label>
+      <label>Private key / rahasia<textarea id="key-secret" rows="5" required spellcheck="false" autocapitalize="off" autocorrect="off"></textarea></label>
+      <label>Catatan (opsional)<textarea id="key-notes" rows="2" maxlength="1000"></textarea></label>
+      <p class="error" id="key-error" role="alert"></p>
+      <div class="row">
+        <button type="button" class="ghost" id="btn-key-cancel">Batal</button>
+        <button type="submit" class="primary">Simpan</button>
+      </div>
+    </form>
+  </dialog>
+
+  <input type="file" id="file-import" accept=".json,application/json" hidden>
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+  <script src="vendor/qrcode.js"></script>
+  <script type="module" src="js/app.js"></script>
+</body>
+</html>
