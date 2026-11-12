@@ -52,6 +52,23 @@ Workflow `.github/workflows/pages.yml` menjalankan unit test lalu men-deploy oto
 
 Setelah di-install, aplikasi tetap berjalan tanpa internet.
 
+### Versi offline untuk PC (tidak update otomatis)
+
+Versi online di github.io selalu mengambil kode terbaru. Kalau akun GitHub pembuatnya sampai dibobol, kode jahat bisa ikut terkirim ke semua pengguna. Untuk PC, ada **versi offline** yang berjalan dari komputer Anda sendiri dan hanya berubah kalau Anda yang menggantinya.
+
+1. Unduh `seekure-offline-vX.Y.Z.zip` dari halaman **[Releases](https://github.com/woeatomo/Seekure/releases)**.
+2. Periksa hash SHA-256-nya: bandingkan dengan `SHA256SUMS.txt` di halaman rilis yang sama (perintahnya ada di `BACA-SAYA.txt`).
+3. Ekstrak, lalu jalankan:
+   - **Windows:** klik dua kali `Jalankan-Seekure-Windows.cmd`. Ini memakai PowerShell bawaan Windows, tidak perlu instalasi apa pun.
+   - **macOS/Linux:** `sh jalankan-seekure.sh` (butuh python3).
+4. Browser terbuka di `http://localhost:8737/`. Pindahkan brankas lewat **Ekspor/Impor cadangan**.
+
+Paketnya **reproducible**: siapa pun bisa checkout tag yang sama, menjalankan `sh scripts/build-offline.sh`, dan mendapatkan zip dengan hash yang identik. Server lokalnya hanya bisa diakses dari komputer itu sendiri, hanya melayani folder `app/`, dan sudah diuji otomatis di Windows, macOS, dan Linux.
+
+> Kunci fisik terikat ke alamat web. Kunci yang didaftarkan di github.io tidak bekerja di `localhost`. Setelah impor, buka brankas dengan kunci pemulihan, lalu daftarkan kunci fisik lagi untuk alamat ini.
+
+**Membuat rilis baru:** naikkan `APP_VERSION` di `js/version.js`, commit, lalu push tag `vX.Y.Z`. Workflow `offline.yml` akan membangun paket, mengujinya di 3 OS, dan membuat GitHub Release.
+
 ### Memakai brankas yang sama di PC dan HP
 
 Data tersimpan di perangkat masing-masing, tidak ada cloud. Untuk memindahkan brankas:
@@ -70,6 +87,9 @@ js/webauthn.js        Kunci fisik via WebAuthn PRF (hmac-secret)
 js/totp.js            TOTP/HOTP (RFC 4226/6238), base32, URI otpauth
 js/app.js             Logika aplikasi
 sw.js                 Service worker (offline)
+js/version.js         Nomor versi (dicek saat rilis)
+offline/              Launcher versi offline (Windows .cmd/PowerShell, macOS/Linux .sh)
+scripts/              Build paket offline reproducible + uji server lokal
 vendor/qrcode.js      Generator QR (qrcode-generator 1.4.4, MIT, © Kazuhiko Arase)
 tests/                Unit test + uji end-to-end di browser
 ```

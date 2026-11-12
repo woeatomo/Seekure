@@ -1,0 +1,60 @@
+SEEKURE - VERSI OFFLINE
+=======================
+
+Versi ini berjalan sepenuhnya dari komputer Anda dan TIDAK PERNAH update
+otomatis. Kode yang Anda jalankan hari ini akan tetap sama sampai Anda sendiri
+memutuskan mengganti foldernya dengan versi yang lebih baru.
+
+Kenapa? Versi online (github.io) selalu mengambil kode terbaru dari GitHub.
+Jika akun GitHub pembuatnya dibobol, kode jahat bisa ikut terkirim. Versi
+offline yang sudah Anda periksa tidak terpengaruh.
+
+
+CARA MENJALANKAN
+----------------
+Windows : klik dua kali  Jalankan-Seekure-Windows.cmd
+          (jika muncul peringatan SmartScreen: "More info" -> "Run anyway")
+macOS   : buka Terminal di folder ini, ketik:  sh jalankan-seekure.sh
+Linux   : buka Terminal di folder ini, ketik:  sh jalankan-seekure.sh
+
+Browser akan terbuka di http://localhost:8737/
+Biarkan jendela hitam (server) tetap terbuka selama memakai Seekure.
+Disarankan memakai Chrome atau Edge.
+
+Bisa juga di-"Install" dari browser (ikon Install di address bar) agar
+tampil seperti aplikasi biasa. Server tetap harus dijalankan dulu.
+
+
+MEMINDAHKAN BRANKAS DARI VERSI ONLINE
+-------------------------------------
+Data brankas tersimpan per alamat. Versi offline (localhost:8737) TIDAK
+otomatis melihat brankas di versi online (github.io).
+
+1. Di versi online: Pengaturan -> Cadangan -> Ekspor cadangan
+2. Di versi offline: Impor cadangan, lalu buka dengan master password + 2FA.
+
+Kunci fisik (YubiKey) terikat ke alamat web. Kunci yang didaftarkan di
+github.io tidak bekerja di localhost. Setelah impor, buka brankas dengan
+KUNCI PEMULIHAN, lalu daftarkan kunci fisik Anda lagi di Pengaturan.
+(Kunci untuk github.io tetap tersimpan dan tetap bekerja di sana.)
+
+
+MEMERIKSA KEASLIAN FILE ZIP
+---------------------------
+Bandingkan hash SHA-256 file zip dengan yang tertulis di halaman rilis GitHub
+(file SHA256SUMS.txt):
+
+Windows : certutil -hashfile seekure-offline-vX.Y.Z.zip SHA256
+macOS   : shasum -a 256 seekure-offline-vX.Y.Z.zip
+Linux   : sha256sum seekure-offline-vX.Y.Z.zip
+
+Paket ini dibuat secara reproducible: siapa pun bisa membangun ulang zip yang
+identik dari kode sumber (tag yang sama) dengan  sh scripts/build-offline.sh
+lalu membandingkan hash-nya.
+
+
+UPDATE
+------
+Unduh versi baru dari halaman Releases, periksa hash-nya, lalu jalankan dari
+folder baru. Data brankas tetap ada (tersimpan di browser untuk alamat
+localhost:8737), tapi tetap buat cadangan sebelum update.

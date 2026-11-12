@@ -1,0 +1,96 @@
+name: Versi offline (build, uji, rilis)
+
+on:
+  push:
+    branches: [main, ccr-31c5417d-wdznxx]
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Unit test
+        run: npm test
+      - name: Build paket offline (reproducible)
+        run: sh scripts/build-offline.sh
+      - name: Cek build ulang menghasilkan hash yang sama
+        run: |
+          h1=$(cut -d' ' -f1 dist/SHA256SUMS.txt)
+          sh scripts/build-offline.sh > /dev/null
+          h2=$(cut -d' ' -f1 dist/SHA256SUMS.txt)
+          test "$h1" = "$h2"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: seekure-offline
+          path: dist/
+
+  test-launcher:
+    needs: build
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest, ubuntu-latest]
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
+    env:
+      SEEKURE_NO_BROWSER: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: seekure-offline
+          path: dist
+      - name: Ekstrak zip
+        run: |
+          mkdir run
+          unzip -q dist/seekure-offline-v*.zip -d run
+          ls run/*
+      - name: Jalankan launcher Windows (.cmd + PowerShell)
+        if: runner.os == 'Windows'
+        run: |
+          cd run/seekure-offline-v*
+          MSYS_NO_PATHCONV=1 cmd.exe /c Jalankan-Seekure-Windows.cmd > ../server.log 2>&1 &
+      - name: Jalankan launcher macOS/Linux
+        if: runner.os != 'Windows'
+        run: |
+          sh run/seekure-offline-v*/jalankan-seekure.sh > run/server.log 2>&1 &
+      - name: Uji server lokal
+        run: sh scripts/test-offline-server.sh http://localhost:8737
+      - name: Log server
+        if: always()
+        run: cat run/server.log || true
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [build, test-launcher]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Cek tag sama dengan versi aplikasi
+        run: |
+          V=$(sed -n "s/.*APP_VERSION = '\([^']*\)'.*/\1/p" js/version.js)
+          if [ "v$V" != "$GITHUB_REF_NAME" ]; then
+            echo "Tag $GITHUB_REF_NAME tidak sama dengan APP_VERSION v$V"; exit 1
+          fi
+      - uses: actions/download-artifact@v4
+        with:
+          name: seekure-offline
+          path: dist
+      - name: Buat GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" dist/*.zip dist/SHA256SUMS.txt \
+            --title "Seekure $GITHUB_REF_NAME" --notes-file dist/RELEASE_NOTES.md
