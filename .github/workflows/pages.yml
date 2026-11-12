@@ -1,0 +1,53 @@
+name: Deploy ke GitHub Pages
+
+on:
+  push:
+    branches: [main, ccr-31c5417d-wdznxx]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Unit test (kripto & TOTP)
+        run: npm test
+
+      - name: Siapkan folder situs (hanya file aplikasi)
+        run: |
+          mkdir -p _site
+          cp -r index.html manifest.webmanifest sw.js css js vendor icons _site/
+          touch _site/.nojekyll
+
+      - uses: actions/configure-pages@v5
+        with:
+          enablement: true
+        continue-on-error: true
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

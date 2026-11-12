@@ -37,7 +37,11 @@ python3 -m http.server 8080
 # buka http://localhost:8080
 ```
 
-**Supaya bisa di-install di HP:** host folder ini di layanan HTTPS statis mana saja, misalnya **GitHub Pages** (Settings → Pages → *Deploy from branch*), Netlify, atau Cloudflare Pages. Semua file bersifat statis dan tidak perlu proses *build*.
+**Online via GitHub Pages:** **https://woeatomo.github.io/seekure/**
+
+Workflow `.github/workflows/pages.yml` menjalankan unit test lalu men-deploy otomatis setiap ada push. Aktifkan sekali saja di **Settings → Pages → Build and deployment → Source: GitHub Actions**. Hosting HTTPS statis lain (Netlify, Cloudflare Pages) juga bisa, karena tidak perlu proses *build*.
+
+> Data brankas tetap hanya tersimpan di perangkat Anda. GitHub Pages hanya mengirimkan file aplikasinya.
 
 **Cara install:**
 
