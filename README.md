@@ -68,7 +68,7 @@ Paketnya **reproducible**: siapa pun bisa checkout tag yang sama, menjalankan `s
 
 > Kunci fisik terikat ke alamat web. Kunci yang didaftarkan di github.io tidak bekerja di `localhost`. Setelah impor, buka brankas dengan kunci pemulihan, lalu daftarkan kunci fisik lagi untuk alamat ini.
 
-**Membuat rilis baru:** naikkan `APP_VERSION` di `js/version.js`, commit, lalu push tag `vX.Y.Z`. Workflow `offline.yml` akan membangun paket, mengujinya di 3 OS, dan membuat GitHub Release.
+**Membuat rilis baru:** naikkan `APP_VERSION` di `js/version.js` lalu commit. Setelah itu buka GitHub → **Releases → Draft a new release**, buat tag `vX.Y.Z` (harus sama dengan `APP_VERSION`), lalu **Publish**. Bisa juga dengan push tag `vX.Y.Z`. Workflow `offline.yml` akan membangun paket, mengujinya di 3 OS, lalu melampirkan zip + `SHA256SUMS.txt` ke Release tersebut dalam beberapa menit.
 
 ### Memakai brankas yang sama di PC dan HP
 

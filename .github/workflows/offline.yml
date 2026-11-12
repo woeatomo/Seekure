@@ -4,7 +4,13 @@ on:
   push:
     branches: [main, ccr-31c5417d-wdznxx]
     tags: ['v*']
+  release:
+    types: [published]
   workflow_dispatch:
+
+concurrency:
+  group: offline-${{ github.ref }}
+  cancel-in-progress: false
 
 permissions:
   contents: read
@@ -88,9 +94,15 @@ jobs:
         with:
           name: seekure-offline
           path: dist
-      - name: Buat GitHub Release
+      - name: Buat / lengkapi GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create "$GITHUB_REF_NAME" dist/*.zip dist/SHA256SUMS.txt \
-            --title "Seekure $GITHUB_REF_NAME" --notes-file dist/RELEASE_NOTES.md
+          # Release bisa dibuat lewat halaman GitHub (Draft a new release) atau lewat push tag.
+          if gh release view "$GITHUB_REF_NAME" > /dev/null 2>&1; then
+            gh release upload "$GITHUB_REF_NAME" dist/*.zip dist/SHA256SUMS.txt --clobber
+            gh release edit "$GITHUB_REF_NAME" --title "Seekure $GITHUB_REF_NAME" --notes-file dist/RELEASE_NOTES.md
+          else
+            gh release create "$GITHUB_REF_NAME" dist/*.zip dist/SHA256SUMS.txt \
+              --title "Seekure $GITHUB_REF_NAME" --notes-file dist/RELEASE_NOTES.md
+          fi
