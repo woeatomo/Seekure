@@ -1,6 +1,6 @@
 # Seekure 🔐
 
-Aplikasi brankas **private key** untuk **PC dan smartphone**: terenkripsi, berjalan 100% offline, dan dibuka dengan **master password + 2FA (TOTP)**.
+Aplikasi brankas **private key** untuk **PC dan smartphone**: terenkripsi, berjalan 100% offline, dan dibuka dengan **master password + 2FA**. Faktor kedua bisa berupa kode TOTP dari aplikasi authenticator, atau **kunci fisik** (YubiKey/FIDO2).
 
 Seekure dibuat sebagai **PWA (Progressive Web App)**. Satu kode yang sama bisa di-*install* seperti aplikasi biasa di Windows, macOS, Linux, Android, dan iOS, tanpa app store dan tanpa server.
 
@@ -11,6 +11,7 @@ Seekure dibuat sebagai **PWA (Progressive Web App)**. Satu kode yang sama bisa d
 | 🔑 **Hash password** | Master password diubah menjadi kunci dengan **PBKDF2-HMAC-SHA-256** (600.000 iterasi, sesuai rekomendasi OWASP) dan salt acak 16 byte |
 | 🛡️ **Enkripsi** | Semua isi brankas dienkripsi **AES-256-GCM**. Setiap kali disimpan memakai IV acak baru, dan header ikut diautentikasi |
 | 📱 **2FA** | TOTP (RFC 6238), 6 digit, berganti tiap 30 detik. Bisa dipakai dengan Google Authenticator, Microsoft Authenticator, Authy, Aegis, 2FAS, dll. Kode yang sudah dipakai tidak bisa dipakai lagi (anti-replay) |
+| 🔐 **Kunci fisik (opsional)** | YubiKey 5, SoloKey 2, Google Titan, Feitian, dan kunci FIDO2 lain lewat **WebAuthn PRF (hmac-secret)**. Kunci fisik ikut menjadi **bagian dari kunci enkripsi**: file brankas yang dicuri tidak bisa dibuka walaupun password bocor. Mendukung banyak kunci (utama + cadangan) dan **kunci pemulihan** cetak 160-bit |
 | 🧾 **Kode pemulihan** | Ada 8 kode sekali pakai untuk berjaga-jaga kalau HP authenticator hilang. Yang disimpan hanya **hash SHA-256**-nya |
 | 🔍 **Sidik jari SHA-256** | Setiap private key diberi sidik jari, jadi Anda bisa mencocokkan key tanpa menampilkannya. Key yang sama terdeteksi sebagai duplikat |
 | ⏱️ **Kunci otomatis** | Brankas terkunci sendiri setelah tidak dipakai (1–30 menit, bisa diatur) atau 60 detik setelah aplikasi ditinggalkan |
@@ -64,7 +65,8 @@ Data tersimpan di perangkat masing-masing, tidak ada cloud. Untuk memindahkan br
 ```
 index.html            UI (semua layar)
 css/style.css         Tampilan responsif + mode gelap
-js/crypto.js          PBKDF2, AES-GCM, SHA-256, kode pemulihan
+js/crypto.js          PBKDF2, HKDF, AES-GCM, SHA-256, kunci fisik, pemulihan
+js/webauthn.js        Kunci fisik via WebAuthn PRF (hmac-secret)
 js/totp.js            TOTP/HOTP (RFC 4226/6238), base32, URI otpauth
 js/app.js             Logika aplikasi
 sw.js                 Service worker (offline)
@@ -76,14 +78,35 @@ tests/                Unit test + uji end-to-end di browser
 
 ```bash
 npm test         # unit test: kripto, vektor uji resmi RFC 6238, anti-replay, deteksi manipulasi data
-npm run e2e      # alur lengkap di Chromium (desktop + Pixel 7) via Playwright
+npm run e2e      # alur lengkap di Chromium (desktop + Pixel 7) via Playwright, termasuk
+                 # YubiKey virtual: daftar, kunci cadangan, hapus, kunci pemulihan, nonaktifkan
 ```
+
+## Kunci fisik (YubiKey / FIDO2)
+
+Aktifkan lewat **Pengaturan → Kunci fisik**. Setelah aktif, membuka brankas butuh **master password + sentuhan kunci fisik (dengan PIN kunci)**. Faktor ini menggantikan kode TOTP.
+
+```
+master password ──PBKDF2-SHA-256 (600k)──► membuka PK (32 byte acak)
+kunci fisik     ──WebAuthn PRF → HKDF───► membuka HK (32 byte acak)
+kunci pemulihan ──HKDF──────────────────► membuka HK (cadangan bila semua kunci hilang)
+
+kunci data = HKDF-SHA-256(PK ‖ HK)  →  AES-256-GCM
+```
+
+- **Daftarkan minimal 2 kunci** (utama + cadangan) dan simpan di tempat berbeda.
+- **Kunci pemulihan** (32 karakter) ditampilkan satu kali saat mengaktifkan. Tulis di kertas dan simpan terpisah dari kunci fisik.
+- **PIN kunci selalu diminta.** Nilai *hmac-secret* berbeda antara dengan PIN dan tanpa PIN, jadi PIN diwajibkan agar hasilnya konsisten. Bonusnya, kunci yang dicuri tidak bisa dipakai tanpa PIN.
+- **Kunci terikat ke domain.** Kunci yang didaftarkan di `woeatomo.github.io` hanya bekerja di domain itu, termasuk di perangkat lain setelah impor cadangan.
+- **Dukungan browser:** Chrome/Edge di Windows, macOS, Linux, dan Android (USB/NFC). Dukungan di Safari/iOS untuk kunci fisik eksternal masih terbatas. Bila tidak didukung, brankas tetap bisa dibuka dengan kunci pemulihan.
+- **Kembali ke mode TOTP:** pilih **Nonaktifkan kunci fisik**, lalu pindai QR 2FA yang baru.
 
 ## Model keamanan (harap dibaca)
 
-- **Kekuatan utama ada di master password.** Siapa pun yang mendapat file brankas harus menebak password lewat PBKDF2 600k iterasi. Gunakan password yang panjang dan unik.
-- **2FA di Seekure adalah gerbang tingkat aplikasi.** Rahasia TOTP disimpan **di dalam** brankas terenkripsi, karena kode TOTP selalu berganti dan tidak bisa dijadikan kunci enkripsi. Akibatnya, 2FA melindungi dari orang yang tahu password Anda dan memegang perangkat Anda lewat aplikasi ini. Tetapi penyerang yang sudah punya file brankas **dan** password bisa mendekripsi tanpa 2FA. Untuk benar-benar mengunci di level kriptografi diperlukan kunci perangkat keras (misalnya YubiKey/WebAuthn PRF), yang bisa jadi pengembangan berikutnya.
-- **Batas percobaan gagal** disimpan di `localStorage`. Batas ini menghambat percobaan lewat aplikasi, tetapi tidak menghentikan penyerang yang menyalin file brankas. Yang melindungi dalam kasus itu adalah PBKDF2.
-- **Lupa master password = data tidak bisa dipulihkan.** Ini disengaja.
+- **Kekuatan dasar ada di master password.** Siapa pun yang mendapat file brankas harus menebak password lewat PBKDF2 600k iterasi. Gunakan password yang panjang dan unik.
+- **Mode TOTP:** 2FA berfungsi sebagai gerbang tingkat aplikasi. Rahasia TOTP disimpan di dalam brankas terenkripsi, karena kode TOTP selalu berganti dan tidak bisa dijadikan kunci enkripsi. Penyerang yang punya file brankas **dan** password bisa mendekripsi tanpa kode TOTP.
+- **Mode kunci fisik:** menutup celah di atas. Tanpa kunci fisik terdaftar (atau kunci pemulihan), isi brankas **tidak bisa didekripsi** walaupun file dan password sama-sama bocor.
+- **Batas percobaan gagal** disimpan di `localStorage`. Batas ini menghambat percobaan lewat aplikasi, tetapi tidak menghentikan penyerang yang menyalin file brankas. Yang melindungi dalam kasus itu adalah PBKDF2 dan kunci fisik.
+- **Lupa master password = data tidak bisa dipulihkan.** Ini disengaja. Hal yang sama berlaku bila semua kunci fisik **dan** kunci pemulihan hilang.
 - **Lindungi perangkat Anda.** Malware atau keylogger di perangkat bisa membaca apa pun yang Anda ketik, dan ini berlaku untuk semua aplikasi password manager.
 - **Hapus data situs/browser = brankas terhapus.** Rutinlah membuat cadangan.

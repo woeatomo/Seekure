@@ -101,6 +101,40 @@
       <p class="muted small"><button type="button" class="link" id="btn-toggle-recovery">Gunakan kode pemulihan</button></p>
     </section>
 
+    <!-- ===== UNLOCK: kunci fisik ===== -->
+    <section id="screen-hw" class="card" hidden>
+      <h1>Sentuh kunci fisik</h1>
+      <p class="muted">Colokkan atau tempelkan (NFC) kunci fisik Anda, tekan tombol di bawah, masukkan PIN kunci bila diminta, lalu sentuh tombol/logam pada kuncinya.</p>
+      <div class="hw-icon" aria-hidden="true">🔑</div>
+      <p class="error" id="hw-error" role="alert"></p>
+      <button type="button" class="primary wide" id="btn-hw-unlock">Gunakan kunci fisik</button>
+      <form id="form-rk" autocomplete="off" hidden>
+        <label>Kunci pemulihan
+          <input type="text" id="rk-input" autocapitalize="characters" spellcheck="false" placeholder="XXXX-XXXX-XXXX-XXXX-XXXX-XXXX-XXXX-XXXX" required>
+        </label>
+        <button type="submit" class="primary">Buka dengan kunci pemulihan</button>
+      </form>
+      <div class="row top-gap">
+        <button type="button" class="ghost" id="btn-hw-cancel">Batal</button>
+      </div>
+      <p class="muted small"><button type="button" class="link" id="btn-toggle-rk">Kunci fisik hilang? Gunakan kunci pemulihan</button></p>
+    </section>
+
+    <!-- ===== Tampilkan kunci pemulihan (mode kunci fisik) ===== -->
+    <section id="screen-rk-show" class="card" hidden>
+      <h1>Simpan kunci pemulihan</h1>
+      <p class="muted">Jika <b>semua</b> kunci fisik hilang atau rusak, hanya kunci ini (ditambah master password) yang bisa membuka brankas. Tulis di kertas dan simpan <b>terpisah</b> dari kunci fisik. Kunci ini hanya ditampilkan sekali.</p>
+      <code class="secret big" id="rk-show"></code>
+      <label>Ketik 4 karakter terakhir untuk konfirmasi
+        <input type="text" id="rk-confirm" maxlength="4" autocapitalize="characters" autocomplete="off" spellcheck="false">
+      </label>
+      <p class="error" id="rk-show-error" role="alert"></p>
+      <div class="row">
+        <button type="button" class="ghost" id="btn-copy-rk">Salin</button>
+        <button type="button" class="primary" id="btn-rk-done">Saya sudah menyimpannya</button>
+      </div>
+    </section>
+
     <!-- ===== VAULT ===== -->
     <section id="screen-vault" hidden>
       <div class="card">
@@ -130,7 +164,42 @@
           </form>
         </details>
 
-        <details>
+        <details id="hw-details">
+          <summary>Kunci fisik (YubiKey / FIDO2) <span class="pill" id="hw-status">Nonaktif</span></summary>
+          <p class="muted small" id="hw-unsupported" hidden>Browser atau perangkat ini tidak mendukung kunci fisik. Gunakan Chrome/Edge versi terbaru (PC atau Android) lewat HTTPS.</p>
+          <div id="hw-off">
+            <p class="muted small">Jika diaktifkan, brankas hanya bisa dibuka dengan <b>master password + sentuhan kunci fisik</b>. Kunci fisik menggantikan kode TOTP dan ikut menjadi <b>bagian dari kunci enkripsi</b>: file brankas yang dicuri tetap tidak bisa dibuka walaupun password Anda bocor. Kunci harus mendukung FIDO2 <i>hmac-secret</i> (mis. YubiKey 5, SoloKey 2, Google Titan, Feitian) dan memakai <b>PIN kunci</b>. Bila kunci belum punya PIN, browser akan meminta Anda membuatnya.</p>
+            <form id="form-hw-enable" autocomplete="off">
+              <label>Nama kunci<input type="text" id="hw-label" value="YubiKey utama" maxlength="40" required></label>
+              <label>Master password<input type="password" id="hw-enable-pw" required autocomplete="current-password"></label>
+              <p class="error" id="hw-enable-error" role="alert"></p>
+              <button type="submit" class="primary">Daftarkan &amp; aktifkan</button>
+            </form>
+          </div>
+          <div id="hw-on" hidden>
+            <ul class="hw-list" id="hw-list"></ul>
+            <form id="form-hw-add" autocomplete="off">
+              <p class="muted small">Sangat disarankan mendaftarkan <b>kunci cadangan</b> dan menyimpannya di tempat lain.</p>
+              <label>Nama kunci cadangan<input type="text" id="hw-add-label" value="YubiKey cadangan" maxlength="40" required></label>
+              <p class="error" id="hw-add-error" role="alert"></p>
+              <button type="submit" class="primary">+ Daftarkan kunci cadangan</button>
+            </form>
+            <form id="form-hw-rk" autocomplete="off">
+              <p class="muted small">Buat kunci pemulihan baru. Kunci pemulihan lama langsung tidak berlaku.</p>
+              <label>Master password<input type="password" id="hw-rk-pw" required autocomplete="current-password"></label>
+              <p class="error" id="hw-rk-error" role="alert"></p>
+              <button type="submit" class="primary">Buat kunci pemulihan baru</button>
+            </form>
+            <form id="form-hw-disable" autocomplete="off">
+              <p class="muted small">Kembali ke mode master password + kode TOTP. Anda akan diminta memindai QR 2FA yang baru.</p>
+              <label>Master password<input type="password" id="hw-disable-pw" required autocomplete="current-password"></label>
+              <p class="error" id="hw-disable-error" role="alert"></p>
+              <button type="submit" class="danger">Nonaktifkan kunci fisik</button>
+            </form>
+          </div>
+        </details>
+
+        <details id="totp-reset-details">
           <summary>Atur ulang 2FA (ganti HP authenticator)</summary>
           <form id="form-reset2fa" autocomplete="off">
             <label>Kode 2FA saat ini atau kode pemulihan<input type="text" id="reset2fa-code" required autocomplete="one-time-code"></label>
@@ -139,7 +208,7 @@
           </form>
         </details>
 
-        <details>
+        <details id="totp-codes-details">
           <summary>Kode pemulihan (<span id="rc-count">0</span> tersisa)</summary>
           <form id="form-regen" autocomplete="off">
             <p class="muted small">Membuat 8 kode baru dan membatalkan semua kode lama.</p>

@@ -151,3 +151,16 @@ dialog::backdrop { background: rgb(0 0 0 / .5); }
   .card { padding: 16px; }
   .codes { columns: 1; }
 }
+
+/* ---- kunci fisik ---- */
+.hw-icon { font-size: 56px; text-align: center; margin: 12px 0; }
+button.wide { width: 100%; }
+.top-gap { margin-top: 10px; }
+code.secret.big { font-size: 17px; line-height: 1.7; letter-spacing: .04em; padding: 14px; margin: 12px 0; }
+.pill { font-size: 12px; font-weight: 600; padding: 1px 8px; border-radius: 999px; margin-left: 6px; background: var(--code-bg); border: 1px solid var(--border); color: var(--muted); }
+.pill.on { background: var(--ok); border-color: var(--ok); color: #fff; }
+.hw-list { list-style: none; padding: 0; margin: 8px 0 4px; display: grid; gap: 8px; }
+.hw-list li { display: flex; align-items: center; justify-content: space-between; gap: 10px; border: 1px solid var(--border); border-radius: 10px; padding: 8px 12px; }
+.hw-list li small { display: block; color: var(--muted); font-size: 12px; }
+.hw-list li button { min-height: 34px; padding: 4px 12px; font-size: 14px; }
+#hw-on form + form, #hw-on form { border-top: 1px dashed var(--border); padding-top: 10px; margin-top: 10px; }

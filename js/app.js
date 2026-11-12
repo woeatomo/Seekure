@@ -1,8 +1,10 @@
 import {
-  createVault, openVault, sealVault, randomBytes, toB64,
-  generateRecoveryCodes, hashRecoveryCode, timingSafeEqual, fingerprint, PBKDF2_ITERATIONS,
+  createVault, sealVault, unlockPassword, unlockHardware, unlockRecoveryKey, changePassword,
+  enableHardware, addHardwareKey, removeHardwareKey, regenerateRecoveryKey, disableHardware,
+  isValidRecord, randomBytes, toB64, generateRecoveryCodes, hashRecoveryCode, timingSafeEqual, fingerprint,
 } from './crypto.js';
 import { generateSecret, verifyTotp, otpauthUri } from './totp.js';
+import { hardwareSupported, registerKey, evaluateKey } from './webauthn.js';
 
 const STORE_KEY = 'seekure.vault';
 const LOCK_KEY = 'seekure.lockout';
@@ -15,10 +17,10 @@ const $ = (id) => document.getElementById(id);
 
 // ---------- state ----------
 let record = loadRecord();
-let session = null;      // { key, data } — hanya ada di memori saat terbuka
-let pending = null;      // hasil password benar, menunggu 2FA
+let session = null;      // { sess, data }: hanya ada di memori saat brankas terbuka
+let pending = null;      // { sess, data?, needsHardware? }: password benar, menunggu faktor ke-2
 let setupState = null;   // { password, secret } saat membuat brankas
-let resetState = null;   // { secret } saat mengatur ulang 2FA
+let resetState = null;   // { secret, disableHw? } saat mengatur ulang 2FA
 let useRecovery = false;
 let idleTimer = null;
 let hiddenAt = 0;
@@ -32,7 +34,7 @@ function saveRecord(r) {
   localStorage.setItem(STORE_KEY, JSON.stringify(r));
 }
 async function persist() {
-  saveRecord(await sealVault(record, session.key, session.data));
+  saveRecord(await sealVault(session.sess, session.data));
 }
 
 // ---------- pembatasan percobaan (brute-force) ----------
@@ -57,8 +59,21 @@ function lockMessage() {
   return s ? `Terlalu banyak percobaan gagal. Coba lagi dalam ${s} detik.` : '';
 }
 
+/** Memastikan master password benar (untuk tindakan sensitif saat brankas terbuka). */
+async function verifyPassword(pw) {
+  if (lockedSeconds()) return false;
+  try {
+    await unlockPassword(record, pw);
+    return true;
+  } catch {
+    registerFail();
+    return false;
+  }
+}
+
 // ---------- UI helpers ----------
-const SCREENS = ['screen-setup', 'screen-2fa-setup', 'screen-recovery', 'screen-unlock', 'screen-verify', 'screen-vault', 'screen-settings'];
+const SCREENS = ['screen-setup', 'screen-2fa-setup', 'screen-recovery', 'screen-unlock', 'screen-verify',
+  'screen-hw', 'screen-rk-show', 'screen-vault', 'screen-settings'];
 function show(id) {
   for (const s of SCREENS) $(s).hidden = s !== id;
   $('vault-actions').hidden = !session;
@@ -73,17 +88,23 @@ function toast(msg) {
   t.textContent = msg;
   t.classList.add('show');
   clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => t.classList.remove('show'), 2600);
+  toastTimer = setTimeout(() => t.classList.remove('show'), 3200);
 }
 
-async function busy(button, fn) {
-  const label = button.textContent;
+async function busy(button, fn, label = 'Memproses…') {
+  const original = button.textContent;
   button.disabled = true;
-  button.textContent = 'Memproses…';
-  try { return await fn(); } finally { button.disabled = false; button.textContent = label; }
+  button.textContent = label;
+  try { return await fn(); } finally { button.disabled = false; button.textContent = original; }
 }
 
 function submitBtn(form) { return form.querySelector('button[type=submit]'); }
+
+function el(tag, props = {}, ...children) {
+  const n = Object.assign(document.createElement(tag), props);
+  n.append(...children);
+  return n;
+}
 
 async function copyText(text, what = 'Disalin') {
   try {
@@ -114,6 +135,8 @@ function renderQr(secret) {
   $('totp-secret-text').textContent = secret.match(/.{1,4}/g).join(' ');
 }
 
+const fmtDate = (iso) => new Date(iso).toLocaleDateString('id-ID', { day: 'numeric', month: 'short', year: 'numeric' });
+
 // ---------- auto-lock ----------
 function autoLockMs() { return (session?.data.settings?.autoLockMin || 5) * 60_000; }
 function armIdle() {
@@ -132,6 +155,7 @@ function lock(msg) {
   resetState = null;
   clearTimeout(idleTimer);
   $('key-list').replaceChildren();
+  $('hw-list').replaceChildren();
   if ($('dlg-key').open) $('dlg-key').close();
   $('form-key').reset();
   $('unlock-pw').value = '';
@@ -162,12 +186,17 @@ $('form-setup').addEventListener('submit', (e) => {
   if (passwordScore(pw) < 2) return void ($('setup-error').textContent = 'Password terlalu lemah. Buat lebih panjang/variatif.');
   setupState = { password: pw, secret: generateSecret() };
   $('setup-pw').value = $('setup-pw2').value = '';
-  $('twofa-title').textContent = 'Aktifkan 2FA';
-  $('twofa-sub').textContent = 'Langkah 2 dari 3 — pindai QR ini dengan aplikasi authenticator (Google Authenticator, Microsoft Authenticator, Authy, Aegis, 2FAS…).';
-  renderQr(setupState.secret);
+  show2faSetup(setupState.secret, 'Aktifkan 2FA',
+    'Langkah 2 dari 3 — pindai QR ini dengan aplikasi authenticator (Google Authenticator, Microsoft Authenticator, Authy, Aegis, 2FAS…).');
+});
+
+function show2faSetup(secret, title, sub) {
+  $('twofa-title').textContent = title;
+  $('twofa-sub').textContent = sub;
+  renderQr(secret);
   $('setup-otp').value = '';
   show('screen-2fa-setup');
-});
+}
 
 let pendingRecoveryCodes = null;
 $('form-2fa-setup').addEventListener('submit', async (e) => {
@@ -180,11 +209,13 @@ $('form-2fa-setup').addEventListener('submit', async (e) => {
 
   await busy(submitBtn(e.target), async () => {
     if (resetState) {
+      const { disableHw } = resetState;
+      if (disableHw) disableHardware(session.sess);
       session.data.totp = { secret: resetState.secret, lastCounter: counter };
       resetState = null;
       await persist();
-      toast('2FA berhasil diatur ulang.');
-      show('screen-settings');
+      toast(disableHw ? 'Kunci fisik dinonaktifkan. Brankas kini memakai password + TOTP.' : '2FA berhasil diatur ulang.');
+      openSettings();
       return;
     }
     const codes = generateRecoveryCodes();
@@ -195,24 +226,23 @@ $('form-2fa-setup').addEventListener('submit', async (e) => {
       settings: { autoLockMin: 5 },
       createdAt: new Date().toISOString(),
     };
-    const { record: r, key } = await createVault(setupState.password, data);
+    const { record: r, sess } = await createVault(setupState.password, data);
     setupState = null;
     saveRecord(r);
-    session = { key, data };
+    session = { sess, data };
     showRecoveryCodes(codes);
   });
 });
 
 $('btn-2fa-cancel').addEventListener('click', () => {
-  if (resetState) { resetState = null; show('screen-settings'); return; }
+  if (resetState) { resetState = null; openSettings(); return; }
   setupState = null;
   show('screen-setup');
 });
 
 function showRecoveryCodes(codes) {
   pendingRecoveryCodes = codes;
-  const ol = $('recovery-list');
-  ol.replaceChildren(...codes.map((c) => Object.assign(document.createElement('li'), { textContent: c })));
+  $('recovery-list').replaceChildren(...codes.map((c) => el('li', { textContent: c })));
   show('screen-recovery');
 }
 $('btn-copy-codes').addEventListener('click', () => pendingRecoveryCodes && copyText(pendingRecoveryCodes.join('\n'), 'Kode pemulihan disalin'));
@@ -222,26 +252,40 @@ $('btn-recovery-done').addEventListener('click', () => {
   route();
 });
 
-// ================= UNLOCK =================
+// ================= UNLOCK: langkah 1 (password) =================
 $('form-unlock').addEventListener('submit', async (e) => {
   e.preventDefault();
   if (lockedSeconds()) return void ($('unlock-error').textContent = lockMessage());
   const pw = $('unlock-pw').value;
   await busy($('btn-unlock'), async () => {
     try {
-      pending = await openVault(record, pw);
-      $('unlock-pw').value = '';
+      pending = await unlockPassword(record, pw);
+    } catch (err) {
+      registerFail();
+      $('unlock-error').textContent = lockMessage() || err.message;
+      return;
+    }
+    $('unlock-pw').value = '';
+    if (pending.needsHardware) {
+      showHwStep();
+    } else {
       useRecovery = false;
       updateRecoveryToggle();
       $('verify-otp').value = '';
       show('screen-verify');
-    } catch (err) {
-      registerFail();
-      $('unlock-error').textContent = lockMessage() || err.message;
     }
   });
 });
 
+async function finishUnlock(data) {
+  resetFails();
+  session = { sess: pending.sess, data };
+  pending = null;
+  await persist(); // simpan lastCounter / kode terpakai / migrasi format
+  route();
+}
+
+// ================= UNLOCK: langkah 2a (kode TOTP / kode pemulihan) =================
 function updateRecoveryToggle() {
   $('verify-label').firstChild.textContent = useRecovery ? 'Kode pemulihan (XXXX-XXXX-XXXX)' : 'Kode 6 digit dari aplikasi authenticator';
   $('verify-otp').inputMode = useRecovery ? 'text' : 'numeric';
@@ -273,7 +317,7 @@ async function checkSecondFactor(data, input, allowRecovery) {
 
 $('form-verify').addEventListener('submit', async (e) => {
   e.preventDefault();
-  if (!pending) return show('screen-unlock');
+  if (!pending?.data) return show('screen-unlock');
   if (lockedSeconds()) return void ($('verify-error').textContent = lockMessage());
   await busy(submitBtn(e.target), async () => {
     const kind = await checkSecondFactor(pending.data, $('verify-otp').value, useRecovery);
@@ -282,17 +326,64 @@ $('form-verify').addEventListener('submit', async (e) => {
       $('verify-error').textContent = lockMessage() || (useRecovery ? 'Kode pemulihan tidak valid.' : 'Kode 2FA salah atau sudah dipakai.');
       return;
     }
-    resetFails();
-    session = pending;
-    pending = null;
-    await persist(); // simpan lastCounter / kode pemulihan yang terpakai
-    route();
+    await finishUnlock(pending.data);
     if (kind === 'recovery') toast(`Kode pemulihan dipakai. Tersisa ${session.data.recovery.length}. Segera atur ulang 2FA.`);
   });
 });
 
+// ================= UNLOCK: langkah 2b (kunci fisik / kunci pemulihan) =================
+function showHwStep() {
+  $('form-rk').hidden = true;
+  $('btn-hw-unlock').hidden = false;
+  $('btn-toggle-rk').textContent = 'Kunci fisik hilang? Gunakan kunci pemulihan';
+  $('rk-input').value = '';
+  show('screen-hw');
+  if (!hardwareSupported()) $('hw-error').textContent = 'Browser ini tidak mendukung kunci fisik. Gunakan Chrome/Edge terbaru, atau buka dengan kunci pemulihan.';
+}
+
+$('btn-hw-unlock').addEventListener('click', async (e) => {
+  if (!pending?.needsHardware) return show('screen-unlock');
+  $('hw-error').textContent = '';
+  await busy(e.currentTarget, async () => {
+    try {
+      const { id, prf } = await evaluateKey(pending.sess.hw.slots);
+      const data = await unlockHardware(record, pending.sess, id, prf);
+      await finishUnlock(data);
+    } catch (err) {
+      $('hw-error').textContent = err.message;
+    }
+  }, 'Sentuh kunci fisik Anda…');
+});
+
+$('btn-toggle-rk').addEventListener('click', () => {
+  const toRk = $('form-rk').hidden;
+  $('form-rk').hidden = !toRk;
+  $('btn-hw-unlock').hidden = toRk;
+  $('btn-toggle-rk').textContent = toRk ? 'Gunakan kunci fisik' : 'Kunci fisik hilang? Gunakan kunci pemulihan';
+  $('hw-error').textContent = '';
+  if (toRk) $('rk-input').focus();
+});
+
+$('form-rk').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  if (!pending?.needsHardware) return show('screen-unlock');
+  if (lockedSeconds()) return void ($('hw-error').textContent = lockMessage());
+  await busy(submitBtn(e.target), async () => {
+    try {
+      const data = await unlockRecoveryKey(record, pending.sess, $('rk-input').value);
+      await finishUnlock(data);
+      toast('Dibuka dengan kunci pemulihan. Jika kunci fisik hilang, hapus dari daftar dan daftarkan kunci baru.');
+    } catch (err) {
+      registerFail();
+      $('hw-error').textContent = lockMessage() || err.message;
+    }
+  });
+});
+
+$('btn-hw-cancel').addEventListener('click', () => { pending = null; show('screen-unlock'); });
+
 // ================= VAULT =================
-async function renderKeys() {
+function renderKeys() {
   if (!session) return;
   const q = $('search').value.trim().toLowerCase();
   const keys = session.data.keys.filter((k) => !q || k.label.toLowerCase().includes(q) || k.type.toLowerCase().includes(q));
@@ -300,12 +391,6 @@ async function renderKeys() {
   $('key-list').replaceChildren(...keys.map(keyItem));
 }
 $('search').addEventListener('input', renderKeys);
-
-function el(tag, props = {}, ...children) {
-  const n = Object.assign(document.createElement(tag), props);
-  n.append(...children);
-  return n;
-}
 
 function keyItem(k) {
   const secretBox = el('pre', { className: 'secret-box', hidden: true });
@@ -387,12 +472,14 @@ $('form-key').addEventListener('submit', async (e) => {
 $('btn-lock').addEventListener('click', () => lock());
 
 // ================= SETTINGS =================
-$('btn-settings').addEventListener('click', () => {
+function openSettings() {
   $('rc-count').textContent = session.data.recovery.length;
   $('autolock').value = String(session.data.settings?.autoLockMin || 5);
   document.querySelectorAll('#screen-settings form').forEach((f) => f.reset());
+  renderHwSection();
   show('screen-settings');
-});
+}
+$('btn-settings').addEventListener('click', openSettings);
 $('btn-settings-close').addEventListener('click', () => route());
 
 $('form-chpw').addEventListener('submit', async (e) => {
@@ -401,15 +488,9 @@ $('form-chpw').addEventListener('submit', async (e) => {
   if (n1 !== n2) return void ($('chpw-error').textContent = 'Password baru tidak sama.');
   if (n1.length < 12 || passwordScore(n1) < 2) return void ($('chpw-error').textContent = 'Password baru terlalu lemah (min. 12 karakter).');
   await busy(submitBtn(e.target), async () => {
-    try {
-      await openVault(record, oldPw);
-    } catch {
-      registerFail();
-      return void ($('chpw-error').textContent = 'Password saat ini salah.');
-    }
-    const { record: r, key } = await createVault(n1, session.data, PBKDF2_ITERATIONS);
-    saveRecord(r);
-    session.key = key;
+    if (!(await verifyPassword(oldPw))) return void ($('chpw-error').textContent = lockMessage() || 'Password saat ini salah.');
+    await changePassword(session.sess, n1);
+    await persist();
     e.target.reset();
     toast('Master password diganti.');
   });
@@ -422,17 +503,14 @@ $('form-reset2fa').addEventListener('submit', async (e) => {
   if (!kind) { registerFail(); return void ($('reset2fa-error').textContent = lockMessage() || 'Kode tidak valid.'); }
   await persist();
   resetState = { secret: generateSecret() };
-  $('twofa-title').textContent = 'Atur ulang 2FA';
-  $('twofa-sub').textContent = 'Pindai QR baru ini dengan aplikasi authenticator, lalu hapus entri Seekure yang lama.';
-  renderQr(resetState.secret);
-  $('setup-otp').value = '';
-  show('screen-2fa-setup');
+  show2faSetup(resetState.secret, 'Atur ulang 2FA', 'Pindai QR baru ini dengan aplikasi authenticator, lalu hapus entri Seekure yang lama.');
 });
 
 $('form-regen').addEventListener('submit', async (e) => {
   e.preventDefault();
+  if (lockedSeconds()) return void ($('regen-error').textContent = lockMessage());
   const counter = await verifyTotp(session.data.totp.secret, $('regen-code').value, { lastCounter: session.data.totp.lastCounter });
-  if (counter === null) { registerFail(); return void ($('regen-error').textContent = 'Kode 2FA salah.'); }
+  if (counter === null) { registerFail(); return void ($('regen-error').textContent = lockMessage() || 'Kode 2FA salah.'); }
   session.data.totp.lastCounter = counter;
   const codes = generateRecoveryCodes();
   session.data.recovery = await Promise.all(codes.map(hashRecoveryCode));
@@ -447,6 +525,109 @@ $('autolock').addEventListener('change', async (e) => {
   toast('Disimpan.');
 });
 
+// ---------- kunci fisik ----------
+function renderHwSection() {
+  const on = Boolean(session.sess.hw);
+  const supported = hardwareSupported();
+  $('hw-status').textContent = on ? 'Aktif' : 'Nonaktif';
+  $('hw-status').classList.toggle('on', on);
+  $('hw-unsupported').hidden = supported;
+  $('hw-off').hidden = on || !supported;
+  $('hw-on').hidden = !on;
+  // Dalam mode kunci fisik, pengaturan TOTP tidak dipakai untuk membuka brankas.
+  $('totp-reset-details').hidden = on;
+  $('totp-codes-details').hidden = on;
+  if (!on) return void $('hw-list').replaceChildren();
+
+  const slots = session.sess.hw.slots;
+  $('hw-list').replaceChildren(...slots.map((s) => {
+    const del = el('button', { type: 'button', className: 'ghost danger-text', textContent: 'Hapus', disabled: slots.length <= 1 });
+    del.title = slots.length <= 1 ? 'Minimal harus ada satu kunci fisik' : '';
+    del.onclick = async () => {
+      if (!confirm(`Hapus kunci "${s.label}" dari brankas? Kunci ini tidak akan bisa membuka brankas lagi.`)) return;
+      removeHardwareKey(session.sess, s.id);
+      await persist();
+      renderHwSection();
+      toast('Kunci fisik dihapus.');
+    };
+    return el('li', {}, el('div', {}, el('strong', { textContent: `🔑 ${s.label}` }), el('small', { textContent: `Didaftarkan ${fmtDate(s.createdAt)}` })), del);
+  }));
+}
+
+let pendingRk = null;
+function showRecoveryKey(code) {
+  pendingRk = code;
+  $('rk-show').textContent = code;
+  $('rk-confirm').value = '';
+  show('screen-rk-show');
+}
+$('btn-copy-rk').addEventListener('click', () => pendingRk && copyText(pendingRk, 'Kunci pemulihan disalin'));
+$('btn-rk-done').addEventListener('click', () => {
+  if (!pendingRk) return openSettings();
+  if ($('rk-confirm').value.trim().toUpperCase() !== pendingRk.slice(-4)) {
+    return void ($('rk-show-error').textContent = '4 karakter terakhir tidak cocok. Periksa catatan Anda.');
+  }
+  pendingRk = null;
+  $('rk-show').textContent = '';
+  openSettings();
+  toast('Kunci fisik aktif. Daftarkan juga kunci cadangan.');
+});
+
+$('form-hw-enable').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const err = $('hw-enable-error');
+  await busy(submitBtn(e.target), async () => {
+    if (lockedSeconds()) return void (err.textContent = lockMessage());
+    try {
+      // WebAuthn dipanggil langsung setelah tombol ditekan (Safari mewajibkan gestur pengguna),
+      // baru setelah itu password diperiksa.
+      const key = await registerKey($('hw-label').value.trim() || 'Kunci fisik');
+      if (!(await verifyPassword($('hw-enable-pw').value))) return void (err.textContent = lockMessage() || 'Master password salah.');
+      const code = await enableHardware(session.sess, key);
+      await persist();
+      showRecoveryKey(code);
+    } catch (ex) {
+      err.textContent = ex.message;
+    }
+  }, 'Sentuh kunci fisik Anda…');
+});
+
+$('form-hw-add').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  await busy(submitBtn(e.target), async () => {
+    try {
+      const key = await registerKey($('hw-add-label').value.trim() || 'Kunci cadangan', session.sess.hw.slots.map((s) => s.id));
+      await addHardwareKey(session.sess, key);
+      await persist();
+      renderHwSection();
+      toast(`Kunci "${key.label}" terdaftar.`);
+    } catch (ex) {
+      $('hw-add-error').textContent = ex.message;
+    }
+  }, 'Sentuh kunci cadangan…');
+});
+
+$('form-hw-rk').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  await busy(submitBtn(e.target), async () => {
+    if (!(await verifyPassword($('hw-rk-pw').value))) return void ($('hw-rk-error').textContent = lockMessage() || 'Master password salah.');
+    const code = await regenerateRecoveryKey(session.sess);
+    await persist();
+    showRecoveryKey(code);
+  });
+});
+
+$('form-hw-disable').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  await busy(submitBtn(e.target), async () => {
+    if (!(await verifyPassword($('hw-disable-pw').value))) return void ($('hw-disable-error').textContent = lockMessage() || 'Master password salah.');
+    // Kunci fisik baru dinonaktifkan setelah 2FA TOTP baru terverifikasi.
+    resetState = { secret: generateSecret(), disableHw: true };
+    show2faSetup(resetState.secret, 'Kembali ke 2FA TOTP', 'Pindai QR ini dengan aplikasi authenticator. Kunci fisik baru dinonaktifkan setelah kode terverifikasi.');
+  });
+});
+
+// ---------- cadangan ----------
 $('btn-export').addEventListener('click', () => {
   const blob = new Blob([JSON.stringify(record, null, 2)], { type: 'application/json' });
   const a = el('a', { href: URL.createObjectURL(blob), download: `seekure-backup-${new Date().toISOString().slice(0, 10)}.json` });
@@ -462,15 +643,12 @@ $('file-import').addEventListener('change', async (e) => {
   const file = e.target.files[0];
   e.target.value = '';
   if (!file) return;
-  try {
-    const r = JSON.parse(await file.text());
-    if (r?.v !== 1 || r.kdf?.name !== 'PBKDF2' || !r.iv || !r.ct || !r.kdf.salt) throw new Error();
-    if (record && !confirm('Brankas di perangkat ini akan DIGANTI dengan isi cadangan. Lanjutkan?')) return;
-    saveRecord(r);
-    lock('Cadangan diimpor. Buka dengan master password + 2FA.');
-  } catch {
-    toast('File cadangan tidak valid.');
-  }
+  let r;
+  try { r = JSON.parse(await file.text()); } catch { r = null; }
+  if (!isValidRecord(r)) return toast('File cadangan tidak valid.');
+  if (record && !confirm('Brankas di perangkat ini akan DIGANTI dengan isi cadangan. Lanjutkan?')) return;
+  saveRecord(r);
+  lock(r.hw ? 'Cadangan diimpor. Buka dengan master password + kunci fisik.' : 'Cadangan diimpor. Buka dengan master password + 2FA.');
 });
 
 $('form-wipe').addEventListener('submit', (e) => {
