@@ -110,7 +110,10 @@
       <button type="button" class="primary wide" id="btn-hw-unlock">Gunakan kunci fisik</button>
       <form id="form-rk" autocomplete="off" hidden>
         <label>Kunci pemulihan
-          <input type="text" id="rk-input" autocapitalize="characters" spellcheck="false" placeholder="XXXX-XXXX-XXXX-XXXX-XXXX-XXXX-XXXX-XXXX" required>
+          <span class="secret-field">
+            <input type="password" id="rk-input" autocapitalize="characters" spellcheck="false" placeholder="XXXX-XXXX-XXXX-XXXX-XXXX-XXXX-XXXX-XXXX" required autocomplete="off" data-1p-ignore data-lpignore="true" data-bwignore data-form-type="other">
+            <button type="button" class="eye" aria-label="Tampilkan / sembunyikan" aria-pressed="false">👁</button>
+          </span>
         </label>
         <button type="submit" class="primary">Buka dengan kunci pemulihan</button>
       </form>
@@ -202,7 +205,10 @@
         <details id="totp-reset-details">
           <summary>Atur ulang 2FA (ganti HP authenticator)</summary>
           <form id="form-reset2fa" autocomplete="off">
-            <label>Kode 2FA saat ini atau kode pemulihan<input type="text" id="reset2fa-code" required autocomplete="one-time-code"></label>
+            <label>Kode 2FA saat ini atau kode pemulihan<span class="secret-field">
+              <input type="password" id="reset2fa-code" required spellcheck="false" autocomplete="off" data-1p-ignore data-lpignore="true" data-bwignore data-form-type="other">
+              <button type="button" class="eye" aria-label="Tampilkan / sembunyikan" aria-pressed="false">👁</button>
+            </span></label>
             <p class="error" id="reset2fa-error" role="alert"></p>
             <button type="submit" class="primary">Lanjut</button>
           </form>
@@ -276,7 +282,14 @@
           <option>Lainnya</option>
         </select>
       </label>
-      <label>Private key / rahasia<textarea id="key-secret" rows="5" required spellcheck="false" autocapitalize="off" autocorrect="off"></textarea></label>
+      <label>Private key / rahasia
+        <span class="secret-field">
+          <input type="password" id="key-secret" required spellcheck="false" autocapitalize="off" autocorrect="off" autocomplete="off" data-1p-ignore data-lpignore="true" data-bwignore data-form-type="other">
+          <textarea id="key-secret-multi" rows="6" class="masked" hidden spellcheck="false" autocapitalize="off" autocorrect="off" autocomplete="off" data-1p-ignore data-lpignore="true" data-bwignore data-form-type="other"></textarea>
+          <button type="button" class="eye" aria-label="Tampilkan / sembunyikan" aria-pressed="false">👁</button>
+        </span>
+      </label>
+      <p class="hint">Kolom ini tersamar agar keyboard HP tidak mempelajari atau menyimpan isinya. Jenis SSH/PGP memakai kolom banyak baris. Jika browser menawarkan menyimpan "password" ini, pilih <b>Jangan pernah</b>.</p>
       <label>Catatan (opsional)<textarea id="key-notes" rows="2" maxlength="1000"></textarea></label>
       <p class="error" id="key-error" role="alert"></p>
       <div class="row">

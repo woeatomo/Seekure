@@ -61,6 +61,11 @@ async function setupVault(page, t, snap = async () => {}) {
   await page.click('#btn-recovery-done');
 
   await page.click('#btn-add');
+  assert.equal(await page.getAttribute('#key-secret', 'type'), 'password', 'kolom key harus tersamar (keyboard incognito)');
+  await page.click('#dlg-key .eye');
+  assert.equal(await page.getAttribute('#key-secret', 'type'), 'text');
+  await page.click('#dlg-key .eye');
+  assert.equal(await page.getAttribute('#key-secret', 'type'), 'password');
   await page.fill('#key-label', 'Wallet ETH utama');
   await page.fill('#key-secret', KEY);
   await page.fill('#key-notes', 'Hot wallet harian');
@@ -176,6 +181,36 @@ async function runTotp(name, contextOpts) {
     }
   }
 
+  // Kunci SSH multi-baris: kolom banyak baris yang tetap tersamar
+  await unlockTotp(page, t, secret);
+  const SSH = '-----BEGIN OPENSSH PRIVATE KEY-----\nb3BlbnNzaC1rZXktdjEAAAAABG5vbmUAAAAEbm9uZQ\nAAAAMwAAAAtzc2gtZWQyNTUxOQ==\n-----END OPENSSH PRIVATE KEY-----';
+  await page.click('#btn-add');
+  await page.fill('#key-label', 'Server SSH');
+  await page.selectOption('#key-type', 'SSH');
+  assert.ok(await page.isHidden('#key-secret'));
+  assert.ok(await page.isVisible('#key-secret-multi'));
+  assert.ok(await page.evaluate(() => document.getElementById('key-secret-multi').classList.contains('masked')));
+  await page.fill('#key-secret-multi', SSH);
+  await page.click('#form-key button[type=submit]');
+  await page.waitForFunction(() => document.querySelectorAll('.key').length === 2);
+  const sshItem = page.locator('.key', { hasText: 'Server SSH' });
+  await sshItem.locator('.hold-btn').hover();
+  await page.mouse.down();
+  assert.equal(await sshItem.locator('.secret-box').textContent(), SSH, 'baris baru harus tetap utuh');
+  await page.mouse.up();
+  // Ubah: kunci multi-baris dibuka lagi di kolom banyak baris
+  await sshItem.locator('button:has-text("Ubah")').click();
+  assert.equal(await page.inputValue('#key-secret-multi'), SSH);
+  await page.click('#btn-key-cancel');
+  await page.click('#btn-lock');
+
+  // Kode pemulihan diketik di kolom tersamar
+  await enterPassword(page);
+  await page.waitForSelector(visible('screen-verify'));
+  await page.click('#btn-toggle-recovery');
+  assert.equal(await page.getAttribute('#verify-otp', 'type'), 'password');
+  await page.click('#btn-verify-cancel');
+
   // auto-lock
   await unlockTotp(page, t, secret);
   await page.click('#btn-settings');
@@ -260,6 +295,7 @@ async function runHardware(name, contextOpts) {
   await enterPassword(page);
   await page.waitForSelector(visible('screen-hw'));
   await page.click('#btn-toggle-rk');
+  assert.equal(await page.getAttribute('#rk-input', 'type'), 'password');
   await page.fill('#rk-input', 'AAAA-AAAA-AAAA-AAAA-AAAA-AAAA-AAAA-AAAA');
   await page.click('#form-rk button[type=submit]');
   await page.waitForFunction(() => /salah/.test(document.getElementById('hw-error').textContent));

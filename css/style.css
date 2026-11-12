@@ -176,3 +176,17 @@ body.privacy::after {
   font-weight: 700; font-size: 18px; color: var(--text); pointer-events: none; z-index: 30;
 }
 .secret-box { user-select: none; -webkit-user-select: none; }
+
+/* ---- kolom rahasia tersamar ---- */
+.secret-field { position: relative; display: block; }
+.secret-field input, .secret-field textarea { padding-right: 52px; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-weight: 400; }
+.secret-field .eye {
+  position: absolute; right: 6px; top: 6px; margin: 0;
+  min-height: 36px; width: 40px; padding: 0; font-size: 18px; line-height: 1;
+  border: 0; background: transparent;
+}
+.secret-field .eye[aria-pressed="true"] { opacity: .55; }
+textarea.masked { -webkit-text-security: disc; }
+@supports not (-webkit-text-security: disc) {
+  textarea.masked { filter: blur(6px); }
+}

@@ -16,6 +16,7 @@ Seekure dibuat sebagai **PWA (Progressive Web App)**. Satu kode yang sama bisa d
 | 🔍 **Sidik jari SHA-256** | Setiap private key diberi sidik jari, jadi Anda bisa mencocokkan key tanpa menampilkannya. Key yang sama terdeteksi sebagai duplikat |
 | ⏱️ **Kunci otomatis** | Brankas terkunci sendiri setelah tidak dipakai (1–30 menit, bisa diatur) atau 60 detik setelah aplikasi ditinggalkan |
 | 🚫 **Anti brute-force** | Setelah 5 kali gagal, ada jeda yang makin lama (30 detik, lalu 1 menit, 2 menit, … sampai maks. 1 jam) |
+| 👁️ **Tampilan & input aman** | Key hanya terlihat selama tombol ditahan, dan layar disamarkan saat aplikasi tidak aktif. Kolom private key dan kode pemulihan **tersamar**, sehingga keyboard HP masuk mode incognito dan tidak mempelajari atau menyimpan isinya |
 | 📋 **Clipboard aman** | Key yang disalin dibersihkan dari clipboard setelah 30 detik. Key yang ditampilkan disembunyikan lagi setelah 30 detik |
 | 💾 **Cadangan & sinkron** | Ekspor/impor file cadangan yang **tetap terenkripsi**, untuk memindahkan brankas antara PC dan HP |
 | ✈️ **Offline** | Tidak ada server, analitik, atau request jaringan. CSP ketat (`default-src 'none'`) |

@@ -76,6 +76,7 @@ async function verifyPassword(pw) {
 const SCREENS = ['screen-setup', 'screen-2fa-setup', 'screen-recovery', 'screen-unlock', 'screen-verify',
   'screen-hw', 'screen-rk-show', 'screen-vault', 'screen-settings'];
 function show(id) {
+  maskAll();
   for (const s of SCREENS) $(s).hidden = s !== id;
   $('vault-actions').hidden = !session;
   document.querySelectorAll('.error').forEach((e) => (e.textContent = ''));
@@ -106,6 +107,24 @@ function el(tag, props = {}, ...children) {
   n.append(...children);
   return n;
 }
+
+// ---------- kolom rahasia tersamar ----------
+// Kolom type="password" membuat keyboard HP (Gboard, SwiftKey, dll.) masuk mode
+// incognito: isi tidak dipelajari, tidak disarankan ulang, dan tidak masuk riwayat.
+function setMasked(field, masked) {
+  field.querySelectorAll('input').forEach((i) => { i.type = masked ? 'password' : 'text'; });
+  field.querySelectorAll('textarea').forEach((t) => t.classList.toggle('masked', masked));
+  const eye = field.querySelector('.eye');
+  eye.setAttribute('aria-pressed', String(!masked));
+  eye.textContent = masked ? '👁' : '🙈';
+}
+function maskAll() { document.querySelectorAll('.secret-field').forEach((f) => setMasked(f, true)); }
+document.querySelectorAll('.secret-field .eye').forEach((eye) => {
+  eye.addEventListener('click', () => {
+    const field = eye.closest('.secret-field');
+    setMasked(field, eye.getAttribute('aria-pressed') === 'true');
+  });
+});
 
 async function copyText(text, what = 'Disalin') {
   try {
@@ -308,6 +327,7 @@ async function finishUnlock(data) {
 function updateRecoveryToggle() {
   $('verify-label').firstChild.textContent = useRecovery ? 'Kode pemulihan (XXXX-XXXX-XXXX)' : 'Kode 6 digit dari aplikasi authenticator';
   $('verify-otp').inputMode = useRecovery ? 'text' : 'numeric';
+  $('verify-otp').type = useRecovery ? 'password' : 'text';
   $('btn-toggle-recovery').textContent = useRecovery ? 'Gunakan kode authenticator' : 'Gunakan kode pemulihan';
 }
 $('btn-toggle-recovery').addEventListener('click', () => {
@@ -473,19 +493,41 @@ function keyItem(k) {
     el('div', { className: 'row wrap' }, btnReveal, btnCopy, btnEdit, btnDel));
 }
 
+// Kunci SSH/PGP terdiri dari banyak baris; kolom password hanya satu baris.
+const MULTILINE_TYPES = new Set(['SSH', 'PGP']);
+const secretInput = () => ($('key-secret-multi').hidden ? $('key-secret') : $('key-secret-multi'));
+function setSecretMode(multi) {
+  const value = secretInput().value;
+  $('key-secret').hidden = multi;
+  $('key-secret').required = !multi;
+  $('key-secret-multi').hidden = !multi;
+  $('key-secret-multi').required = multi;
+  $('key-secret').value = multi ? '' : value;
+  $('key-secret-multi').value = multi ? value : '';
+}
+$('key-type').addEventListener('change', () => {
+  setSecretMode(MULTILINE_TYPES.has($('key-type').value) || secretInput().value.includes('\n'));
+});
+
 let editingId = null;
 function openKeyDialog(k = null) {
   editingId = k?.id ?? null;
   $('dlg-key-title').textContent = k ? 'Ubah private key' : 'Tambah private key';
   $('key-label').value = k?.label ?? '';
   $('key-type').value = k?.type ?? 'Crypto wallet';
-  $('key-secret').value = k?.secret ?? '';
+  $('key-secret').value = '';
+  $('key-secret-multi').value = k?.secret ?? '';
+  $('key-secret-multi').hidden = false;
+  setSecretMode(MULTILINE_TYPES.has($('key-type').value) || (k?.secret ?? '').includes('\n'));
+  maskAll();
   $('key-notes').value = k?.notes ?? '';
   $('key-error').textContent = '';
   $('dlg-key').showModal();
 }
 function closeKeyDialog() {
   $('form-key').reset();
+  $('key-secret-multi').value = '';
+  maskAll();
   editingId = null;
   $('dlg-key').close();
 }
@@ -496,7 +538,7 @@ $('dlg-key').addEventListener('cancel', () => $('form-key').reset());
 $('form-key').addEventListener('submit', async (e) => {
   e.preventDefault();
   const label = $('key-label').value.trim();
-  const secret = $('key-secret').value.trim();
+  const secret = secretInput().value.trim();
   if (!label || !secret) return void ($('key-error').textContent = 'Label dan private key wajib diisi.');
   const fp = await fingerprint(secret);
   const dup = session.data.keys.find((x) => x.fingerprint === fp && x.id !== editingId);
