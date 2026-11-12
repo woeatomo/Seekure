@@ -37,7 +37,7 @@ python3 -m http.server 8080
 # buka http://localhost:8080
 ```
 
-**Online via GitHub Pages:** **https://woeatomo.github.io/seekure/**
+**Online via GitHub Pages:** **https://woeatomo.github.io/Seekure/**
 
 Workflow `.github/workflows/pages.yml` menjalankan unit test lalu men-deploy otomatis setiap ada push. Aktifkan sekali saja di **Settings → Pages → Build and deployment → Source: GitHub Actions**. Hosting HTTPS statis lain (Netlify, Cloudflare Pages) juga bisa, karena tidak perlu proses *build*.
 
